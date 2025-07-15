@@ -1,0 +1,8 @@
+# TCP targets configuration
+# Format: <host> <port>
+# Example:
+abnamro.com 443
+abnamro.nl 443
+ideal.nl 443
+cloudflare.com 443
+database.example.internal 5432

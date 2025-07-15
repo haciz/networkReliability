@@ -1,0 +1,9 @@
+# HTTP targets configuration
+# Format: <url> <method>
+# Example:
+https://abnamro.com GET
+https://abnamro.nl GET
+https://ideal.nl GET
+https://httpbin.org/post POST
+https://httpbin.org/status/200 GET
+https://httpbin.org/status/404 GET

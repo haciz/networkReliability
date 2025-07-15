@@ -1,0 +1,8 @@
+# DNS targets configuration
+# Format: <domain> <record_type> <resolver_ip>
+# Example:
+abnamro.com A 8.8.8.8
+abnamro.com A 1.1.1.1
+abnamro.com CNAME 8.8.4.4
+abnamro.nl MX 8.8.8.8
+github.com AAAA 1.0.0.1
