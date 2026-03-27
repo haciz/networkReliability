@@ -50,9 +50,8 @@ services:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
-      # Single provisioning mount. The duplicate ./grafana → /etc/grafana/provisioning
-      # mount was shadowing this one and hiding the provisioning/ subdirectory.
       - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboard.json:/var/lib/grafana/dashboards/dashboard.json
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
