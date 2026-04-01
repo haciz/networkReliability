@@ -3,8 +3,9 @@ package http_monitor
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -96,6 +97,17 @@ var (
 		},
 		[]string{"probe", "url", "method", "status_code"},
 	)
+
+	httpResponseSize = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "monitoring",
+			Subsystem: "http",
+			Name:      "response_size_bytes",
+			Help:      "HTTP response body size in bytes",
+			Buckets:   []float64{100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000},
+		},
+		[]string{"probe", "url", "method", "status_code"},
+	)
 )
 
 // Target represents an HTTP target to monitor.
@@ -114,6 +126,7 @@ type Monitor struct {
 	client      *http.Client
 	sem         chan struct{}
 	done        chan struct{}
+	wg          sync.WaitGroup // tracks in-flight probes for graceful shutdown
 }
 
 // NewMonitor creates a new HTTP monitor.
@@ -151,13 +164,13 @@ func NewMonitor(targetsFile, probe string, interval time.Duration) (*Monitor, er
 func (m *Monitor) Reload() {
 	targets, err := loadTargets(m.targetsFile)
 	if err != nil {
-		log.Printf("HTTP Monitor: reload failed: %v", err)
+		slog.Error("HTTP monitor reload failed", "error", err)
 		return
 	}
 	m.mu.Lock()
 	m.targets = targets
 	m.mu.Unlock()
-	log.Printf("HTTP Monitor: reloaded %d targets from %s", len(targets), m.targetsFile)
+	slog.Info("HTTP monitor reloaded targets", "count", len(targets), "file", m.targetsFile)
 }
 
 // Start begins the HTTP monitoring loop.
@@ -168,7 +181,7 @@ func (m *Monitor) Start() {
 	m.mu.RLock()
 	count := len(m.targets)
 	m.mu.RUnlock()
-	log.Printf("HTTP Monitor started with %d targets (probe=%s)", count, m.probe)
+	slog.Info("HTTP monitor started", "targets", count, "probe", m.probe)
 
 	m.checkAll()
 	for {
@@ -181,10 +194,11 @@ func (m *Monitor) Start() {
 	}
 }
 
-// Stop halts the HTTP monitoring. In-flight probes finish naturally.
+// Stop halts the HTTP monitoring and waits for all in-flight probes to finish.
 func (m *Monitor) Stop() {
 	close(m.done)
-	log.Println("HTTP Monitor stopped")
+	m.wg.Wait()
+	slog.Info("HTTP monitor stopped")
 }
 
 func (m *Monitor) checkAll() {
@@ -195,8 +209,10 @@ func (m *Monitor) checkAll() {
 
 	for _, t := range targets {
 		t := t
+		m.wg.Add(1)
 		m.sem <- struct{}{}
 		go func() {
+			defer m.wg.Done()
 			defer func() { <-m.sem }()
 			m.checkHTTP(t)
 		}()
@@ -251,12 +267,11 @@ func (m *Monitor) checkHTTP(target Target) {
 	}
 	defer resp.Body.Close()
 
-	// Drain body without allocating — we only care about timing and status,
-	// not the response content.
-	io.Copy(io.Discard, resp.Body) //nolint:errcheck
-
 	requestDuration := time.Since(start).Seconds()
 	statusCode := strconv.Itoa(resp.StatusCode)
+
+	// Drain body: count bytes for the size metric without allocating a buffer.
+	bodyBytes, _ := io.Copy(io.Discard, resp.Body)
 
 	// Record waterfall timings.
 	if !dnsStart.IsZero() && !dnsEnd.IsZero() {
@@ -291,6 +306,7 @@ func (m *Monitor) checkHTTP(target Target) {
 		"status_code": statusCode,
 	}
 	httpRequestDuration.With(labels).Observe(requestDuration)
+	httpResponseSize.With(labels).Observe(float64(bodyBytes))
 
 	// 4xx and 5xx are application-level failures, tracked separately
 	// so they don't silently count as successes in dashboards.
@@ -321,7 +337,20 @@ func classifyError(err error) string {
 	return "other"
 }
 
+type httpYAMLConfig struct {
+	Targets []httpYAMLTarget `yaml:"targets"`
+}
+
+type httpYAMLTarget struct {
+	URL    string `yaml:"url"`
+	Method string `yaml:"method"`
+}
+
 func loadTargets(file string) ([]Target, error) {
+	if config.IsYAML(file) {
+		return loadTargetsYAML(file)
+	}
+	// Legacy .txt path — kept for backward compatibility.
 	rows, err := config.LoadLines(file, 2)
 	if err != nil {
 		return nil, err
@@ -329,6 +358,37 @@ func loadTargets(file string) ([]Target, error) {
 	targets := make([]Target, 0, len(rows))
 	for _, parts := range rows {
 		targets = append(targets, Target{URL: parts[0], Method: parts[1]})
+	}
+	return targets, nil
+}
+
+var validMethods = map[string]bool{
+	"GET": true, "POST": true, "PUT": true, "PATCH": true,
+	"DELETE": true, "HEAD": true, "OPTIONS": true,
+}
+
+func loadTargetsYAML(file string) ([]Target, error) {
+	var cfg httpYAMLConfig
+	if err := config.DecodeYAML(file, &cfg); err != nil {
+		return nil, err
+	}
+	var errs []string
+	for i, t := range cfg.Targets {
+		if t.URL == "" {
+			errs = append(errs, fmt.Sprintf("target[%d]: url is required", i))
+		} else if _, err := url.ParseRequestURI(t.URL); err != nil {
+			errs = append(errs, fmt.Sprintf("target[%d]: invalid url %q: %v", i, t.URL, err))
+		}
+		if !validMethods[strings.ToUpper(t.Method)] {
+			errs = append(errs, fmt.Sprintf("target[%d]: unknown method %q", i, t.Method))
+		}
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("%s: %s", file, strings.Join(errs, "; "))
+	}
+	targets := make([]Target, 0, len(cfg.Targets))
+	for _, t := range cfg.Targets {
+		targets = append(targets, Target{URL: t.URL, Method: strings.ToUpper(t.Method)})
 	}
 	return targets, nil
 }

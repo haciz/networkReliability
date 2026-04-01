@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 )
@@ -27,9 +28,7 @@ func LoadLines(file string, minFields int) ([][]string, error) {
 		}
 		parts := strings.Fields(line)
 		if len(parts) < minFields {
-			// log via stderr so callers don't need a logger dependency
-			fmt.Fprintf(os.Stderr, "config: %s:%d: expected %d fields, got %d — skipping\n",
-				file, lineNum, minFields, len(parts))
+			slog.Warn("config: skipping short line", "file", file, "line", lineNum, "expected", minFields, "got", len(parts))
 			continue
 		}
 		result = append(result, parts)

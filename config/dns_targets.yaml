@@ -1,0 +1,16 @@
+targets:
+  - domain: abnamro.com
+    record_type: A
+    resolver: 8.8.8.8
+  - domain: abnamro.com
+    record_type: A
+    resolver: 1.1.1.1
+  - domain: abnamro.com
+    record_type: CNAME
+    resolver: 8.8.4.4
+  - domain: abnamro.nl
+    record_type: MX
+    resolver: 8.8.8.8
+  - domain: github.com
+    record_type: AAAA
+    resolver: 1.0.0.1

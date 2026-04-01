@@ -1,0 +1,9 @@
+targets:
+  - host: abnamro.com
+    count: 5
+  - host: abnamro.nl
+    count: 5
+  - host: 8.8.8.8
+    count: 5
+  - host: 1.1.1.1
+    count: 5

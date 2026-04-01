@@ -3,7 +3,7 @@ package dns
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"strings"
 	"sync"
@@ -69,13 +69,14 @@ type Target struct {
 
 // Monitor handles DNS monitoring.
 type Monitor struct {
-	probe     string
+	probe       string
 	targetsFile string
-	targets   []Target
-	mu        sync.RWMutex
-	interval  time.Duration
-	sem       chan struct{} // bounds concurrent probes
-	done      chan struct{}
+	targets     []Target
+	mu          sync.RWMutex
+	interval    time.Duration
+	sem         chan struct{} // bounds concurrent probes
+	done        chan struct{}
+	wg          sync.WaitGroup // tracks in-flight probes for graceful shutdown
 }
 
 // NewMonitor creates a new DNS monitor.
@@ -98,13 +99,13 @@ func NewMonitor(targetsFile, probe string, interval time.Duration) (*Monitor, er
 func (m *Monitor) Reload() {
 	targets, err := loadTargets(m.targetsFile)
 	if err != nil {
-		log.Printf("DNS Monitor: reload failed: %v", err)
+		slog.Error("DNS monitor reload failed", "error", err)
 		return
 	}
 	m.mu.Lock()
 	m.targets = targets
 	m.mu.Unlock()
-	log.Printf("DNS Monitor: reloaded %d targets from %s", len(targets), m.targetsFile)
+	slog.Info("DNS monitor reloaded targets", "count", len(targets), "file", m.targetsFile)
 }
 
 // Start begins the DNS monitoring loop.
@@ -115,7 +116,7 @@ func (m *Monitor) Start() {
 	m.mu.RLock()
 	count := len(m.targets)
 	m.mu.RUnlock()
-	log.Printf("DNS Monitor started with %d targets (probe=%s)", count, m.probe)
+	slog.Info("DNS monitor started", "targets", count, "probe", m.probe)
 
 	m.checkAll()
 	for {
@@ -128,10 +129,11 @@ func (m *Monitor) Start() {
 	}
 }
 
-// Stop halts the DNS monitoring. In-flight probes finish naturally.
+// Stop halts the DNS monitoring and waits for all in-flight probes to finish.
 func (m *Monitor) Stop() {
 	close(m.done)
-	log.Println("DNS Monitor stopped")
+	m.wg.Wait()
+	slog.Info("DNS monitor stopped")
 }
 
 func (m *Monitor) checkAll() {
@@ -142,8 +144,10 @@ func (m *Monitor) checkAll() {
 
 	for _, t := range targets {
 		t := t
+		m.wg.Add(1)
 		m.sem <- struct{}{}
 		go func() {
+			defer m.wg.Done()
 			defer func() { <-m.sem }()
 			m.checkDNS(t)
 		}()
@@ -236,7 +240,21 @@ func classifyRcode(rcode int) string {
 	}
 }
 
+type dnsYAMLConfig struct {
+	Targets []dnsYAMLTarget `yaml:"targets"`
+}
+
+type dnsYAMLTarget struct {
+	Domain     string `yaml:"domain"`
+	RecordType string `yaml:"record_type"`
+	Resolver   string `yaml:"resolver"`
+}
+
 func loadTargets(file string) ([]Target, error) {
+	if config.IsYAML(file) {
+		return loadTargetsYAML(file)
+	}
+	// Legacy .txt path — kept for backward compatibility.
 	rows, err := config.LoadLines(file, 3)
 	if err != nil {
 		return nil, err
@@ -247,6 +265,37 @@ func loadTargets(file string) ([]Target, error) {
 			Domain:     parts[0],
 			RecordType: parts[1],
 			Resolver:   parts[2],
+		})
+	}
+	return targets, nil
+}
+
+func loadTargetsYAML(file string) ([]Target, error) {
+	var cfg dnsYAMLConfig
+	if err := config.DecodeYAML(file, &cfg); err != nil {
+		return nil, err
+	}
+	var errs []string
+	for i, t := range cfg.Targets {
+		if t.Domain == "" {
+			errs = append(errs, fmt.Sprintf("target[%d]: domain is required", i))
+		}
+		if t.RecordType == "" {
+			errs = append(errs, fmt.Sprintf("target[%d]: record_type is required", i))
+		}
+		if t.Resolver == "" {
+			errs = append(errs, fmt.Sprintf("target[%d]: resolver is required", i))
+		}
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("%s: %s", file, strings.Join(errs, "; "))
+	}
+	targets := make([]Target, 0, len(cfg.Targets))
+	for _, t := range cfg.Targets {
+		targets = append(targets, Target{
+			Domain:     t.Domain,
+			RecordType: t.RecordType,
+			Resolver:   t.Resolver,
 		})
 	}
 	return targets, nil

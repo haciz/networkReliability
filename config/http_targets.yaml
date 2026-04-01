@@ -1,0 +1,13 @@
+targets:
+  - url: https://abnamro.com
+    method: GET
+  - url: https://abnamro.nl
+    method: GET
+  - url: https://ideal.nl
+    method: GET
+  - url: https://httpbin.org/post
+    method: POST
+  - url: https://httpbin.org/status/200
+    method: GET
+  - url: https://httpbin.org/status/404
+    method: GET

@@ -12,6 +12,10 @@ services:
       # Mount config at runtime so targets can be updated without rebuilding the image.
       # Send SIGHUP to reload: docker kill --signal=HUP network-monitor
       - ./config:/app/config
+    cap_add:
+      - NET_RAW  # required for ICMP raw sockets
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     networks:
       - monitoring
