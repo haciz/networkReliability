@@ -1,0 +1,11 @@
+targets:
+  - host: abnamro.com
+    port: 443
+  - host: abnamro.nl
+    port: 443
+  - host: ideal.nl
+    port: 443
+  - host: cloudflare.com
+    port: 443
+  - host: database.example.internal
+    port: 5432

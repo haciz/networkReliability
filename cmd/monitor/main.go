@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,42 +12,63 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"monitoring-app/internal/dns"
 	"monitoring-app/internal/http_monitor"
+	"monitoring-app/internal/icmp"
 	"monitoring-app/internal/tcp"
 )
 
 func main() {
-	promPort       := flag.String("prom-port", "2112", "Prometheus metrics port")
-	probeName      := flag.String("probe-name", "default", "Name of this probe appliance (appears on every metric label)")
-	dnsTargetsFile := flag.String("dns-targets", "config/dns_targets.txt", "File with DNS targets to monitor")
-	httpTargetsFile := flag.String("http-targets", "config/http_targets.txt", "File with HTTP targets to monitor")
-	tcpTargetsFile := flag.String("tcp-targets", "config/tcp_targets.txt", "File with TCP targets to monitor")
-	interval       := flag.Duration("interval", 10*time.Second, "Monitoring interval")
+	promPort        := flag.String("prom-port", "2112", "Prometheus metrics port")
+	probeName       := flag.String("probe-name", "default", "Name of this probe appliance (appears on every metric label)")
+	dnsTargetsFile  := flag.String("dns-targets", "config/dns_targets.yaml", "File with DNS targets to monitor")
+	httpTargetsFile := flag.String("http-targets", "config/http_targets.yaml", "File with HTTP targets to monitor")
+	tcpTargetsFile  := flag.String("tcp-targets", "config/tcp_targets.yaml", "File with TCP targets to monitor")
+	icmpTargetsFile := flag.String("icmp-targets", "config/icmp_targets.yaml", "File with ICMP ping targets to monitor")
+	interval        := flag.Duration("interval", 10*time.Second, "Monitoring interval")
+	logFormat       := flag.String("log-format", "json", "Log format: json or text")
 	flag.Parse()
+
+	// Configure structured logging. JSON for production; text for local dev.
+	if *logFormat == "text" {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	} else {
+		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	}
 
 	dnsMonitor, err := dns.NewMonitor(*dnsTargetsFile, *probeName, *interval)
 	if err != nil {
-		log.Fatalf("Failed to create DNS monitor: %v", err)
+		slog.Error("failed to create DNS monitor", "error", err)
+		os.Exit(1)
 	}
 	go dnsMonitor.Start()
 
 	httpMonitor, err := http_monitor.NewMonitor(*httpTargetsFile, *probeName, *interval)
 	if err != nil {
-		log.Fatalf("Failed to create HTTP monitor: %v", err)
+		slog.Error("failed to create HTTP monitor", "error", err)
+		os.Exit(1)
 	}
 	go httpMonitor.Start()
 
 	tcpMonitor, err := tcp.NewMonitor(*tcpTargetsFile, *probeName, *interval)
 	if err != nil {
-		log.Fatalf("Failed to create TCP monitor: %v", err)
+		slog.Error("failed to create TCP monitor", "error", err)
+		os.Exit(1)
 	}
 	go tcpMonitor.Start()
+
+	icmpMonitor, err := icmp.NewMonitor(*icmpTargetsFile, *probeName, *interval)
+	if err != nil {
+		slog.Error("failed to create ICMP monitor", "error", err)
+		os.Exit(1)
+	}
+	go icmpMonitor.Start()
 
 	// Prometheus metrics endpoint
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
-		log.Printf("Starting Prometheus metrics server on :%s", *promPort)
+		slog.Info("starting Prometheus metrics server", "port", *promPort)
 		if err := http.ListenAndServe(":"+*promPort, nil); err != nil {
-			log.Fatalf("Failed to start metrics server: %v", err)
+			slog.Error("metrics server failed", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -57,10 +78,11 @@ func main() {
 	signal.Notify(sighup, syscall.SIGHUP)
 	go func() {
 		for range sighup {
-			log.Println("SIGHUP received — reloading target files")
+			slog.Info("SIGHUP received, reloading target files")
 			dnsMonitor.Reload()
 			httpMonitor.Reload()
 			tcpMonitor.Reload()
+			icmpMonitor.Reload()
 		}
 	}()
 
@@ -68,8 +90,20 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
-	dnsMonitor.Stop()
-	httpMonitor.Stop()
-	tcpMonitor.Stop()
-	log.Println("Monitoring stopped")
+	slog.Info("shutdown signal received, draining in-flight probes")
+	stopDone := make(chan struct{})
+	go func() {
+		defer close(stopDone)
+		dnsMonitor.Stop()
+		httpMonitor.Stop()
+		tcpMonitor.Stop()
+		icmpMonitor.Stop()
+	}()
+
+	select {
+	case <-stopDone:
+		slog.Info("all monitors stopped cleanly")
+	case <-time.After(10 * time.Second):
+		slog.Warn("shutdown timed out after 10s, forcing exit")
+	}
 }

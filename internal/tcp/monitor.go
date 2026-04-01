@@ -2,7 +2,8 @@ package tcp
 
 import (
 	"context"
-	"log"
+	"fmt"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -66,6 +67,7 @@ type Monitor struct {
 	interval    time.Duration
 	sem         chan struct{}
 	done        chan struct{}
+	wg          sync.WaitGroup // tracks in-flight probes for graceful shutdown
 }
 
 // NewMonitor creates a new TCP monitor.
@@ -88,13 +90,13 @@ func NewMonitor(targetsFile, probe string, interval time.Duration) (*Monitor, er
 func (m *Monitor) Reload() {
 	targets, err := loadTargets(m.targetsFile)
 	if err != nil {
-		log.Printf("TCP Monitor: reload failed: %v", err)
+		slog.Error("TCP monitor reload failed", "error", err)
 		return
 	}
 	m.mu.Lock()
 	m.targets = targets
 	m.mu.Unlock()
-	log.Printf("TCP Monitor: reloaded %d targets from %s", len(targets), m.targetsFile)
+	slog.Info("TCP monitor reloaded targets", "count", len(targets), "file", m.targetsFile)
 }
 
 // Start begins the TCP monitoring loop.
@@ -105,7 +107,7 @@ func (m *Monitor) Start() {
 	m.mu.RLock()
 	count := len(m.targets)
 	m.mu.RUnlock()
-	log.Printf("TCP Monitor started with %d targets (probe=%s)", count, m.probe)
+	slog.Info("TCP monitor started", "targets", count, "probe", m.probe)
 
 	m.checkAll()
 	for {
@@ -118,10 +120,11 @@ func (m *Monitor) Start() {
 	}
 }
 
-// Stop halts the TCP monitoring. In-flight probes finish naturally.
+// Stop halts the TCP monitoring and waits for all in-flight probes to finish.
 func (m *Monitor) Stop() {
 	close(m.done)
-	log.Println("TCP Monitor stopped")
+	m.wg.Wait()
+	slog.Info("TCP monitor stopped")
 }
 
 func (m *Monitor) checkAll() {
@@ -132,8 +135,10 @@ func (m *Monitor) checkAll() {
 
 	for _, t := range targets {
 		t := t
+		m.wg.Add(1)
 		m.sem <- struct{}{}
 		go func() {
+			defer m.wg.Done()
 			defer func() { <-m.sem }()
 			m.checkTCP(t)
 		}()
@@ -186,7 +191,20 @@ func classifyError(err error) string {
 	return "other"
 }
 
+type tcpYAMLConfig struct {
+	Targets []tcpYAMLTarget `yaml:"targets"`
+}
+
+type tcpYAMLTarget struct {
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+}
+
 func loadTargets(file string) ([]Target, error) {
+	if config.IsYAML(file) {
+		return loadTargetsYAML(file)
+	}
+	// Legacy .txt path — kept for backward compatibility.
 	rows, err := config.LoadLines(file, 2)
 	if err != nil {
 		return nil, err
@@ -194,10 +212,34 @@ func loadTargets(file string) ([]Target, error) {
 	targets := make([]Target, 0, len(rows))
 	for _, parts := range rows {
 		if _, err := strconv.Atoi(parts[1]); err != nil {
-			log.Printf("TCP: invalid port %q in %s — skipping", parts[1], file)
+			slog.Warn("TCP: invalid port, skipping", "port", parts[1], "file", file)
 			continue
 		}
 		targets = append(targets, Target{Host: parts[0], Port: parts[1]})
+	}
+	return targets, nil
+}
+
+func loadTargetsYAML(file string) ([]Target, error) {
+	var cfg tcpYAMLConfig
+	if err := config.DecodeYAML(file, &cfg); err != nil {
+		return nil, err
+	}
+	var errs []string
+	for i, t := range cfg.Targets {
+		if t.Host == "" {
+			errs = append(errs, fmt.Sprintf("target[%d]: host is required", i))
+		}
+		if t.Port < 1 || t.Port > 65535 {
+			errs = append(errs, fmt.Sprintf("target[%d]: port %d is out of range (1-65535)", i, t.Port))
+		}
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("%s: %s", file, strings.Join(errs, "; "))
+	}
+	targets := make([]Target, 0, len(cfg.Targets))
+	for _, t := range cfg.Targets {
+		targets = append(targets, Target{Host: t.Host, Port: strconv.Itoa(t.Port)})
 	}
 	return targets, nil
 }

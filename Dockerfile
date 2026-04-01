@@ -1,9 +1,9 @@
-FROM golang:1.23 AS builder
+FROM golang:1.25 AS builder
 
 WORKDIR /app
 
 # Copy go.mod and go.sum files
-COPY go.mod ./
+COPY go.mod go.sum ./
 
 # Download dependencies
 RUN go mod download
