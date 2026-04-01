@@ -1,28 +1,30 @@
 package dns
 
 import (
-	"bufio"
 	"context"
+	"fmt"
 	"log"
-	"os"
+	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"monitoring-app/internal/config"
 )
 
 var (
-	// Prometheus metrics
-	dnsResolutionTime = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
+	dnsResolutionTime = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
 			Namespace: "monitoring",
 			Subsystem: "dns",
 			Name:      "resolution_time_seconds",
 			Help:      "Time taken to resolve DNS in seconds",
+			Buckets:   prometheus.DefBuckets,
 		},
-		[]string{"domain", "record_type", "resolver"},
+		[]string{"probe", "domain", "record_type", "resolver"},
 	)
 
 	dnsResolutionSuccess = promauto.NewCounterVec(
@@ -32,7 +34,7 @@ var (
 			Name:      "resolution_success_total",
 			Help:      "Total number of successful DNS resolutions",
 		},
-		[]string{"domain", "record_type", "resolver"},
+		[]string{"probe", "domain", "record_type", "resolver"},
 	)
 
 	dnsResolutionFailure = promauto.NewCounterVec(
@@ -42,58 +44,80 @@ var (
 			Name:      "resolution_failure_total",
 			Help:      "Total number of failed DNS resolutions",
 		},
-		[]string{"domain", "record_type", "resolver", "error"},
+		// error_type is a bounded enum: timeout | refused | nxdomain | servfail | other
+		[]string{"probe", "domain", "record_type", "resolver", "error_type"},
 	)
 
-	dnsResponseSize = promauto.NewGaugeVec(
-		prometheus.GaugeOpts{
+	dnsResponseSize = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
 			Namespace: "monitoring",
 			Subsystem: "dns",
 			Name:      "response_size_bytes",
 			Help:      "Size of DNS response in bytes",
+			Buckets:   []float64{64, 128, 256, 512, 1024, 2048, 4096},
 		},
-		[]string{"domain", "record_type", "resolver"},
+		[]string{"probe", "domain", "record_type", "resolver"},
 	)
 )
 
-// Target represents a DNS target to monitor
+// Target represents a DNS target to monitor.
 type Target struct {
 	Domain     string
 	RecordType string
 	Resolver   string
 }
 
-// Monitor handles DNS monitoring
+// Monitor handles DNS monitoring.
 type Monitor struct {
-	targets  []Target
-	interval time.Duration
-	done     chan struct{}
+	probe     string
+	targetsFile string
+	targets   []Target
+	mu        sync.RWMutex
+	interval  time.Duration
+	sem       chan struct{} // bounds concurrent probes
+	done      chan struct{}
 }
 
-// NewMonitor creates a new DNS monitor
-func NewMonitor(targetsFile string, interval time.Duration) (*Monitor, error) {
+// NewMonitor creates a new DNS monitor.
+func NewMonitor(targetsFile, probe string, interval time.Duration) (*Monitor, error) {
 	targets, err := loadTargets(targetsFile)
 	if err != nil {
 		return nil, err
 	}
-
 	return &Monitor{
-		targets:  targets,
-		interval: interval,
-		done:     make(chan struct{}),
+		probe:       probe,
+		targetsFile: targetsFile,
+		targets:     targets,
+		interval:    interval,
+		sem:         make(chan struct{}, 10),
+		done:        make(chan struct{}),
 	}, nil
 }
 
-// Start begins the DNS monitoring
+// Reload re-reads the targets file atomically. Called on SIGHUP.
+func (m *Monitor) Reload() {
+	targets, err := loadTargets(m.targetsFile)
+	if err != nil {
+		log.Printf("DNS Monitor: reload failed: %v", err)
+		return
+	}
+	m.mu.Lock()
+	m.targets = targets
+	m.mu.Unlock()
+	log.Printf("DNS Monitor: reloaded %d targets from %s", len(targets), m.targetsFile)
+}
+
+// Start begins the DNS monitoring loop.
 func (m *Monitor) Start() {
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
 
-	log.Printf("DNS Monitor started with %d targets", len(m.targets))
+	m.mu.RLock()
+	count := len(m.targets)
+	m.mu.RUnlock()
+	log.Printf("DNS Monitor started with %d targets (probe=%s)", count, m.probe)
 
-	// Run immediately at start
 	m.checkAll()
-
 	for {
 		select {
 		case <-ticker.C:
@@ -104,20 +128,28 @@ func (m *Monitor) Start() {
 	}
 }
 
-// Stop halts the DNS monitoring
+// Stop halts the DNS monitoring. In-flight probes finish naturally.
 func (m *Monitor) Stop() {
 	close(m.done)
 	log.Println("DNS Monitor stopped")
 }
 
-// checkAll performs DNS resolution for all targets
 func (m *Monitor) checkAll() {
-	for _, target := range m.targets {
-		go m.checkDNS(target)
+	m.mu.RLock()
+	targets := make([]Target, len(m.targets))
+	copy(targets, m.targets)
+	m.mu.RUnlock()
+
+	for _, t := range targets {
+		t := t
+		m.sem <- struct{}{}
+		go func() {
+			defer func() { <-m.sem }()
+			m.checkDNS(t)
+		}()
 	}
 }
 
-// checkDNS performs a DNS query and records metrics
 func (m *Monitor) checkDNS(target Target) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -125,69 +157,97 @@ func (m *Monitor) checkDNS(target Target) {
 	c := dns.Client{}
 	qType, ok := dns.StringToType[target.RecordType]
 	if !ok {
-		qType = dns.TypeA // Default to A record if type is invalid
+		qType = dns.TypeA
 	}
 
 	msg := dns.Msg{}
 	msg.SetQuestion(dns.Fqdn(target.Domain), qType)
 
-	resp, rtt, err := c.ExchangeContext(ctx, &msg, target.Resolver+":53")
+	start := time.Now()
+	// Support "host" (appends :53) and "host:port" (used as-is, e.g. for testing).
+	resolverAddr := target.Resolver
+	if !strings.Contains(resolverAddr, ":") {
+		resolverAddr = resolverAddr + ":53"
+	}
+	resp, _, err := c.ExchangeContext(ctx, &msg, resolverAddr)
+	rtt := time.Since(start)
 
-	labels := prometheus.Labels{
+	baseLabels := prometheus.Labels{
+		"probe":       m.probe,
 		"domain":      target.Domain,
 		"record_type": target.RecordType,
 		"resolver":    target.Resolver,
 	}
 
 	if err != nil {
-		errLabels := prometheus.Labels{
+		dnsResolutionFailure.With(prometheus.Labels{
+			"probe":       m.probe,
 			"domain":      target.Domain,
 			"record_type": target.RecordType,
 			"resolver":    target.Resolver,
-			"error":       err.Error(),
-		}
-		dnsResolutionFailure.With(errLabels).Inc()
+			"error_type":  classifyError(err),
+		}).Inc()
 		return
 	}
 
-	// Record successful metrics
-	dnsResolutionTime.With(labels).Set(rtt.Seconds())
-	dnsResolutionSuccess.With(labels).Inc()
-	dnsResponseSize.With(labels).Set(float64(resp.Len()))
+	// Check DNS-level errors (NXDOMAIN, SERVFAIL, etc.) — err==nil doesn't mean success
+	if resp.Rcode != dns.RcodeSuccess {
+		dnsResolutionFailure.With(prometheus.Labels{
+			"probe":       m.probe,
+			"domain":      target.Domain,
+			"record_type": target.RecordType,
+			"resolver":    target.Resolver,
+			"error_type":  classifyRcode(resp.Rcode),
+		}).Inc()
+		return
+	}
+
+	dnsResolutionTime.With(baseLabels).Observe(rtt.Seconds())
+	dnsResolutionSuccess.With(baseLabels).Inc()
+	dnsResponseSize.With(baseLabels).Observe(float64(resp.Len()))
 }
 
-// loadTargets loads DNS targets from a file
+// classifyError maps a transport error to a bounded enum string.
+func classifyError(err error) string {
+	s := err.Error()
+	if strings.Contains(s, "timeout") || strings.Contains(s, "deadline") {
+		return "timeout"
+	}
+	if strings.Contains(s, "refused") {
+		return "refused"
+	}
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return "timeout"
+	}
+	return "other"
+}
+
+// classifyRcode maps a DNS RCODE to a bounded enum string.
+func classifyRcode(rcode int) string {
+	switch rcode {
+	case dns.RcodeNameError: // NXDOMAIN
+		return "nxdomain"
+	case dns.RcodeServerFailure:
+		return "servfail"
+	case dns.RcodeRefused:
+		return "refused"
+	default:
+		return fmt.Sprintf("rcode_%d", rcode)
+	}
+}
+
 func loadTargets(file string) ([]Target, error) {
-	f, err := os.Open(file)
+	rows, err := config.LoadLines(file, 3)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-
-	var targets []Target
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		parts := strings.Fields(line)
-		if len(parts) != 3 {
-			log.Printf("Invalid format for DNS target: %s", line)
-			continue
-		}
-
+	targets := make([]Target, 0, len(rows))
+	for _, parts := range rows {
 		targets = append(targets, Target{
 			Domain:     parts[0],
 			RecordType: parts[1],
 			Resolver:   parts[2],
 		})
 	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-
 	return targets, nil
 }

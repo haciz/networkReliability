@@ -25,11 +25,9 @@ RUN apk --no-cache add ca-certificates tzdata
 # Copy the binary from the builder stage
 COPY --from=builder /app/monitor /app/monitor
 
-# Create config directory
+# Create config directory — targets are mounted at runtime via docker-compose volume,
+# not baked into the image. Each probe appliance has its own target files.
 RUN mkdir -p /app/config
-
-# Copy configuration files
-COPY config/ /app/config/
 
 # Expose Prometheus metrics port
 EXPOSE 2112

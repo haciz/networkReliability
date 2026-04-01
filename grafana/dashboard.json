@@ -17,16 +17,204 @@
   "graphTooltip": 0,
   "id": 1,
   "links": [],
+  "templating": {
+    "list": [
+      {
+        "datasource": "Prometheus",
+        "definition": "label_values(monitoring_tcp_connection_success_total, probe)",
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "name": "probe",
+        "label": "Probe",
+        "options": [],
+        "query": {
+          "query": "label_values(monitoring_tcp_connection_success_total, probe)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
   "panels": [
     {
       "collapsed": false,
       "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 0
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 20,
+      "panels": [],
+      "title": "Health Summary",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.001 }
+            ]
+          },
+          "unit": "reqps",
+          "min": 0,
+          "decimals": 3,
+          "noValue": "0"
+        },
+        "overrides": []
       },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "id": 21,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.3.7",
+      "targets": [
+        {
+          "expr": "sum(rate(monitoring_tcp_connection_failure_total{probe=~\"$probe\"}[5m])) or vector(0)",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "TCP Failures / s"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.001 }
+            ]
+          },
+          "unit": "reqps",
+          "min": 0,
+          "decimals": 3,
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "id": 22,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.3.7",
+      "targets": [
+        {
+          "expr": "sum(rate(monitoring_dns_resolution_failure_total{probe=~\"$probe\"}[5m])) or vector(0)",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "DNS Failures / s"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.001 }
+            ]
+          },
+          "unit": "reqps",
+          "min": 0,
+          "decimals": 3,
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "id": 23,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.3.7",
+      "targets": [
+        {
+          "expr": "sum(rate(monitoring_http_request_errors_total{probe=~\"$probe\"}[5m])) or vector(0)",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP Transport Errors / s"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.001 },
+              { "color": "red", "value": 0.1 }
+            ]
+          },
+          "unit": "reqps",
+          "min": 0,
+          "decimals": 3,
+          "noValue": "0"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 24,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "pluginVersion": "7.3.7",
+      "targets": [
+        {
+          "expr": "sum(rate(monitoring_http_response_errors_total{probe=~\"$probe\"}[5m])) or vector(0)",
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP 4xx / 5xx / s"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
       "id": 10,
       "panels": [],
       "title": "TCP Monitoring",
@@ -38,37 +226,20 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
       "fill": 1,
       "fillGradient": 0,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 1
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
       "hiddenSeries": false,
       "id": 2,
       "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
+        "avg": false, "current": false, "max": false,
+        "min": false, "show": true, "total": false, "values": false
       },
       "lines": true,
       "linewidth": 1,
       "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
+      "options": { "alertThreshold": true },
       "percentage": false,
       "pluginVersion": "7.3.7",
       "pointradius": 2,
@@ -78,54 +249,36 @@
       "spaceLength": 10,
       "stack": false,
       "steppedLine": false,
+      "thresholds": [
+        { "colorMode": "warning", "fill": false, "line": true, "op": "gt", "value": 0.1, "yaxis": "left" },
+        { "colorMode": "critical", "fill": false, "line": true, "op": "gt", "value": 0.5, "yaxis": "left" }
+      ],
       "targets": [
         {
-          "expr": "monitoring_tcp_handshake_time_seconds",
+          "expr": "histogram_quantile(0.95, sum(rate(monitoring_tcp_connect_time_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, probe, host, port))",
           "interval": "",
-          "legendFormat": "{{host}}:{{port}}",
+          "legendFormat": "p95 {{probe}} {{host}}:{{port}}",
           "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(monitoring_tcp_connect_time_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, probe, host, port))",
+          "interval": "",
+          "legendFormat": "p50 {{probe}} {{host}}:{{port}}",
+          "refId": "B"
         }
       ],
-      "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "TCP Handshake Time",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
+      "title": "TCP Connect Time (p50 / p95)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
       "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
       "yaxes": [
-        {
-          "format": "s",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
+        { "format": "s", "label": null, "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
       ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      "yaxis": { "align": false, "alignLevel": null }
     },
     {
       "aliasColors": {},
@@ -133,37 +286,20 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
       "fill": 1,
       "fillGradient": 0,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 1
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
       "hiddenSeries": false,
       "id": 4,
       "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
+        "avg": false, "current": false, "max": false,
+        "min": false, "show": true, "total": false, "values": false
       },
       "lines": true,
       "linewidth": 1,
       "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
+      "options": { "alertThreshold": true },
       "percentage": false,
       "pluginVersion": "7.3.7",
       "pointradius": 2,
@@ -173,64 +309,32 @@
       "spaceLength": 10,
       "stack": false,
       "steppedLine": false,
+      "thresholds": [],
       "targets": [
         {
-          "expr": "monitoring_tcp_rtt_seconds",
+          "expr": "sum by (probe, host, port, error_type) (rate(monitoring_tcp_connection_failure_total{probe=~\"$probe\"}[5m]))",
           "interval": "",
-          "legendFormat": "{{host}}:{{port}}",
+          "legendFormat": "{{probe}} {{host}}:{{port}} ({{error_type}})",
           "refId": "A"
         }
       ],
-      "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "TCP RTT",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
+      "title": "TCP Connection Failure Rate (empty = healthy)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
       "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
       "yaxes": [
-        {
-          "format": "s",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
+        { "format": "short", "label": "failures/s", "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
       ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      "yaxis": { "align": false, "alignLevel": null }
     },
     {
       "collapsed": false,
       "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 9
-      },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
       "id": 12,
       "panels": [],
       "title": "DNS Monitoring",
@@ -242,37 +346,20 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
       "fill": 1,
       "fillGradient": 0,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 10
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
       "hiddenSeries": false,
       "id": 6,
       "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
+        "avg": false, "current": false, "max": false,
+        "min": false, "show": true, "total": false, "values": false
       },
       "lines": true,
       "linewidth": 1,
       "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
+      "options": { "alertThreshold": true },
       "percentage": false,
       "pluginVersion": "7.3.7",
       "pointradius": 2,
@@ -282,115 +369,92 @@
       "spaceLength": 10,
       "stack": false,
       "steppedLine": false,
+      "thresholds": [
+        { "colorMode": "warning", "fill": false, "line": true, "op": "gt", "value": 0.05, "yaxis": "left" },
+        { "colorMode": "critical", "fill": false, "line": true, "op": "gt", "value": 0.2, "yaxis": "left" }
+      ],
       "targets": [
         {
-          "expr": "monitoring_dns_resolution_time_seconds",
+          "expr": "histogram_quantile(0.95, sum(rate(monitoring_dns_resolution_time_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, probe, domain, record_type, resolver))",
           "interval": "",
-          "legendFormat": "{{domain}} ({{record_type}}) via {{resolver}}",
+          "legendFormat": "p95 {{probe}} {{domain}} ({{record_type}}) via {{resolver}}",
           "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(monitoring_dns_resolution_time_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, probe, domain, record_type, resolver))",
+          "interval": "",
+          "legendFormat": "p50 {{probe}} {{domain}} ({{record_type}}) via {{resolver}}",
+          "refId": "B"
         }
       ],
-      "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "DNS Resolution Time",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
+      "title": "DNS Resolution Time (p50 / p95)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
       "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
       "yaxes": [
-        {
-          "format": "s",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
+        { "format": "s", "label": null, "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
       ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      "yaxis": { "align": false, "alignLevel": null }
     },
     {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
       "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": null,
-            "filterable": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 10
-      },
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "hiddenSeries": false,
       "id": 14,
-      "options": {
-        "showHeader": true
+      "legend": {
+        "avg": false, "current": false, "max": false,
+        "min": false, "show": true, "total": false, "values": false
       },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": { "alertThreshold": true },
+      "percentage": false,
       "pluginVersion": "7.3.7",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "thresholds": [],
       "targets": [
         {
-          "expr": "sum by (domain, record_type, resolver) (monitoring_dns_resolution_success_total)",
-          "format": "table",
-          "instant": true,
+          "expr": "sum by (probe, domain, record_type, resolver, error_type) (rate(monitoring_dns_resolution_failure_total{probe=~\"$probe\"}[5m]))",
           "interval": "",
-          "legendFormat": "",
+          "legendFormat": "{{probe}} {{domain}} ({{record_type}}) {{error_type}}",
           "refId": "A"
         }
       ],
       "timeFrom": null,
+      "timeRegions": [],
       "timeShift": null,
-      "title": "DNS Resolution Success",
-      "type": "table"
+      "title": "DNS Failure Rate by Error Type (empty = healthy)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
+      "yaxes": [
+        { "format": "short", "label": "failures/s", "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
+      ],
+      "yaxis": { "align": false, "alignLevel": null }
     },
     {
       "collapsed": false,
       "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 18
-      },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
       "id": 16,
       "panels": [],
       "title": "HTTP Monitoring",
@@ -402,37 +466,20 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
       "fill": 1,
       "fillGradient": 0,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 19
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
       "hiddenSeries": false,
       "id": 8,
       "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
+        "avg": false, "current": false, "max": false,
+        "min": false, "show": true, "total": false, "values": false
       },
       "lines": true,
       "linewidth": 1,
       "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
+      "options": { "alertThreshold": true },
       "percentage": false,
       "pluginVersion": "7.3.7",
       "pointradius": 2,
@@ -442,54 +489,30 @@
       "spaceLength": 10,
       "stack": false,
       "steppedLine": false,
+      "thresholds": [
+        { "colorMode": "warning", "fill": false, "line": true, "op": "gt", "value": 1, "yaxis": "left" },
+        { "colorMode": "critical", "fill": false, "line": true, "op": "gt", "value": 3, "yaxis": "left" }
+      ],
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(monitoring_http_request_duration_seconds_bucket[5m])) by (le, url, method))",
+          "expr": "histogram_quantile(0.95, sum(rate(monitoring_http_request_duration_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, probe, url, method))",
           "interval": "",
-          "legendFormat": "{{method}} {{url}}",
+          "legendFormat": "p95 {{probe}} {{method}} {{url}}",
           "refId": "A"
         }
       ],
-      "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "HTTP Request Duration (95th percentile)",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
+      "title": "HTTP Request Duration (p95)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
       "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
       "yaxes": [
-        {
-          "format": "s",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        },
-        {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
-        }
+        { "format": "s", "label": null, "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
       ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      "yaxis": { "align": false, "alignLevel": null }
     },
     {
       "aliasColors": {},
@@ -497,38 +520,20 @@
       "dashLength": 10,
       "dashes": false,
       "datasource": "Prometheus",
-      "description": "",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {}
-        },
-        "overrides": []
-      },
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
       "fill": 1,
       "fillGradient": 0,
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 19
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
       "hiddenSeries": false,
       "id": 18,
       "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
+        "avg": false, "current": false, "max": false,
+        "min": false, "show": true, "total": false, "values": false
       },
       "lines": true,
       "linewidth": 1,
       "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
+      "options": { "alertThreshold": true },
       "percentage": false,
       "pluginVersion": "7.3.7",
       "pointradius": 2,
@@ -538,70 +543,160 @@
       "spaceLength": 10,
       "stack": false,
       "steppedLine": false,
+      "thresholds": [
+        { "colorMode": "warning", "fill": false, "line": true, "op": "gt", "value": 1, "yaxis": "left" },
+        { "colorMode": "critical", "fill": false, "line": true, "op": "gt", "value": 3, "yaxis": "left" }
+      ],
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(monitoring_http_first_byte_duration_seconds_bucket[5m])) by (le, url))",
+          "expr": "histogram_quantile(0.95, sum(rate(monitoring_http_first_byte_duration_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, probe, url))",
           "interval": "",
-          "legendFormat": "{{url}}",
+          "legendFormat": "p95 {{probe}} {{url}}",
           "refId": "A"
         }
       ],
-      "thresholds": [],
       "timeFrom": null,
       "timeRegions": [],
       "timeShift": null,
-      "title": "HTTP Time to First Byte (95th percentile)",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
+      "title": "HTTP Time to First Byte (p95)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
       "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
       "yaxes": [
+        { "format": "s", "label": null, "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
+      ],
+      "yaxis": { "align": false, "alignLevel": null }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
+      "hiddenSeries": false,
+      "id": 25,
+      "legend": {
+        "avg": false, "current": false, "max": false,
+        "min": false, "show": true, "total": false, "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": { "alertThreshold": true },
+      "percentage": false,
+      "pluginVersion": "7.3.7",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "thresholds": [],
+      "targets": [
         {
-          "format": "s",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
+          "expr": "histogram_quantile(0.95, sum(rate(monitoring_http_dns_lookup_duration_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, probe, url))",
+          "interval": "",
+          "legendFormat": "DNS lookup {{probe}} {{url}}",
+          "refId": "A"
         },
         {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
+          "expr": "histogram_quantile(0.95, sum(rate(monitoring_http_connect_duration_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, probe, url))",
+          "interval": "",
+          "legendFormat": "TCP connect {{probe}} {{url}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(monitoring_http_tls_handshake_duration_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, probe, url))",
+          "interval": "",
+          "legendFormat": "TLS handshake {{probe}} {{url}}",
+          "refId": "C"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(monitoring_http_first_byte_duration_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, probe, url))",
+          "interval": "",
+          "legendFormat": "Time to first byte {{probe}} {{url}}",
+          "refId": "D"
         }
       ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "HTTP Waterfall Breakdown (p95) — where is the time going?",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
+      "yaxes": [
+        { "format": "s", "label": null, "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
+      ],
+      "yaxis": { "align": false, "alignLevel": null }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
+      "hiddenSeries": false,
+      "id": 26,
+      "legend": {
+        "avg": false, "current": false, "max": false,
+        "min": false, "show": true, "total": false, "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": { "alertThreshold": true },
+      "percentage": false,
+      "pluginVersion": "7.3.7",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "thresholds": [],
+      "targets": [
+        {
+          "expr": "sum by (probe, url, method, status_code) (rate(monitoring_http_response_errors_total{probe=~\"$probe\"}[5m]))",
+          "interval": "",
+          "legendFormat": "{{status_code}} {{probe}} {{method}} {{url}}",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "HTTP 4xx / 5xx Response Errors (empty = healthy)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
+      "yaxes": [
+        { "format": "short", "label": "errors/s", "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
+      ],
+      "yaxis": { "align": false, "alignLevel": null }
     }
   ],
   "refresh": "10s",
   "schemaVersion": 26,
   "style": "dark",
   "tags": [],
-  "templating": {
-    "list": []
-  },
-  "time": {
-    "from": "now-15m",
-    "to": "now"
-  },
+  "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "",
   "title": "Network Monitoring Dashboard",
   "uid": "network-monitoring",
-  "version": 1
+  "version": 3
 }
