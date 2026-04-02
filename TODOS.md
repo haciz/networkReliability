@@ -10,7 +10,7 @@
 
 **Cons:** Maintaining correctness across probe types is non-trivial (DNS RCODE gap, TCP RTT accuracy, etc.). Blackbox Exporter has 8+ years of production hardening.
 
-**Context:** Raised during /plan-eng-review 2026-03-27. Current approach is defensible. Revisit when adding a 4th probe type.
+**Context:** Raised during /plan-eng-review 2026-03-27. Current approach is defensible. Now shipping 6 probe types (TCP, DNS, HTTP, ICMP, synthetic, traceroute) — revisit this question before adding more.
 
 **Depends on:** None — informational.
 
@@ -29,3 +29,5 @@
 **Context:** Flagged in /office-hours and /plan-eng-review 2026-03-27. Deliberately deferred.
 
 **Depends on:** Complete current bug fixes + probe label + test coverage first.
+
+**Completed:** v0.1.0.0 (2026-04-02) — `internal/icmp/monitor.go` implements RTT p50/p95 + packet loss ratio.
