@@ -112,8 +112,9 @@ var (
 
 // Target represents an HTTP target to monitor.
 type Target struct {
-	URL    string
-	Method string
+	URL     string
+	Method  string
+	Headers map[string]string // optional request headers (e.g. Authorization)
 }
 
 // Monitor handles HTTP monitoring.
@@ -254,6 +255,10 @@ func (m *Monitor) checkHTTP(target Target) {
 		return
 	}
 
+	for k, v := range target.Headers {
+		req.Header.Set(k, v)
+	}
+
 	start := time.Now()
 	resp, err := m.client.Do(req)
 	if err != nil {
@@ -342,8 +347,9 @@ type httpYAMLConfig struct {
 }
 
 type httpYAMLTarget struct {
-	URL    string `yaml:"url"`
-	Method string `yaml:"method"`
+	URL     string            `yaml:"url"`
+	Method  string            `yaml:"method"`
+	Headers map[string]string `yaml:"headers"` // optional: Authorization, X-API-Key, etc.
 }
 
 func loadTargets(file string) ([]Target, error) {
@@ -388,7 +394,11 @@ func loadTargetsYAML(file string) ([]Target, error) {
 	}
 	targets := make([]Target, 0, len(cfg.Targets))
 	for _, t := range cfg.Targets {
-		targets = append(targets, Target{URL: t.URL, Method: strings.ToUpper(t.Method)})
+		targets = append(targets, Target{
+			URL:     t.URL,
+			Method:  strings.ToUpper(t.Method),
+			Headers: t.Headers,
+		})
 	}
 	return targets, nil
 }
