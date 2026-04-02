@@ -1,0 +1,15 @@
+targets:
+  # Google Public DNS — reliable path reference
+  - host: 8.8.8.8
+    max_hops: 30
+    probes_per_hop: 3
+
+  # Cloudflare DNS
+  - host: 1.1.1.1
+    max_hops: 30
+    probes_per_hop: 3
+
+  # Example: trace to a specific destination
+  # - host: abnamro.com
+  #   max_hops: 20
+  #   probes_per_hop: 3
