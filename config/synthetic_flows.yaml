@@ -1,0 +1,45 @@
+flows:
+  # Example: two-step authenticated API flow.
+  # Step 1 logs in and extracts the access token.
+  # Step 2 uses the token to call a protected endpoint.
+  #
+  # Secrets are injected via environment variables — never hardcode credentials.
+  - name: api-auth-flow
+    steps:
+      - name: login
+        url: "https://httpbin.org/post"
+        method: POST
+        body: '{"username": "${TEST_USER}", "password": "${TEST_PASS}"}'
+        body_type: json
+        expected_status: 200
+        # Extract the "url" field from httpbin's echo response as a demo variable.
+        extract:
+          - name: echo_url
+            json_key: url
+
+      - name: use-token
+        url: "https://httpbin.org/get"
+        method: GET
+        headers:
+          X-Probe-Token: "${echo_url}"
+        expected_status: 200
+        body_contains: "httpbin.org"
+
+  # Example: simple availability check with body validation.
+  - name: httpbin-health
+    steps:
+      - name: get-status
+        url: "https://httpbin.org/status/200"
+        method: GET
+        expected_status: 200
+
+  # Example: POST + redirect follow check.
+  - name: httpbin-post-flow
+    steps:
+      - name: post-data
+        url: "https://httpbin.org/post"
+        method: POST
+        body: '{"probe": "network-monitor"}'
+        body_type: json
+        expected_status: 200
+        body_contains: "network-monitor"
