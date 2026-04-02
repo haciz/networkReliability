@@ -1,10 +1,8 @@
 targets:
+  # Single-resolver probes
   - domain: abnamro.com
     record_type: A
     resolver: 8.8.8.8
-  - domain: abnamro.com
-    record_type: A
-    resolver: 1.1.1.1
   - domain: abnamro.com
     record_type: CNAME
     resolver: 8.8.4.4
@@ -14,3 +12,12 @@ targets:
   - domain: github.com
     record_type: AAAA
     resolver: 1.0.0.1
+
+  # Multi-resolver comparison — emits monitoring_dns_resolver_disagreement=1
+  # when answers differ across resolvers (split-brain DNS, propagation lag, etc.)
+  - domain: abnamro.com
+    record_type: A
+    resolvers:
+      - 8.8.8.8
+      - 1.1.1.1
+      - 9.9.9.9
