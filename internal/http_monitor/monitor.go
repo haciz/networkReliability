@@ -373,6 +373,36 @@ var validMethods = map[string]bool{
 	"DELETE": true, "HEAD": true, "OPTIONS": true,
 }
 
+// forbiddenHeaders are HTTP header names that must not be set by target
+// configs. They control framing/routing at the transport layer and override
+// them can corrupt requests or bypass server-side security checks.
+var forbiddenHeaders = map[string]bool{
+	"host":              true,
+	"content-length":    true,
+	"transfer-encoding": true,
+	"trailer":           true,
+	"connection":        true,
+}
+
+// String returns a safe representation of Target with Authorization header
+// values redacted, suitable for use in log messages.
+func (t Target) String() string {
+	safe := make(map[string]string, len(t.Headers))
+	for k, v := range t.Headers {
+		if strings.EqualFold(k, "authorization") {
+			parts := strings.SplitN(v, " ", 2)
+			if len(parts) == 2 {
+				safe[k] = parts[0] + " [REDACTED]"
+			} else {
+				safe[k] = "[REDACTED]"
+			}
+		} else {
+			safe[k] = v
+		}
+	}
+	return fmt.Sprintf("Target{URL:%s Method:%s Headers:%v}", t.URL, t.Method, safe)
+}
+
 func loadTargetsYAML(file string) ([]Target, error) {
 	var cfg httpYAMLConfig
 	if err := config.DecodeYAML(file, &cfg); err != nil {
@@ -387,6 +417,11 @@ func loadTargetsYAML(file string) ([]Target, error) {
 		}
 		if !validMethods[strings.ToUpper(t.Method)] {
 			errs = append(errs, fmt.Sprintf("target[%d]: unknown method %q", i, t.Method))
+		}
+		for hk := range t.Headers {
+			if forbiddenHeaders[strings.ToLower(hk)] {
+				errs = append(errs, fmt.Sprintf("target[%d]: header %q is not allowed (controls HTTP framing/routing)", i, hk))
+			}
 		}
 	}
 	if len(errs) > 0 {

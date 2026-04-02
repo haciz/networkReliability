@@ -9,11 +9,12 @@
 package traceroute
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -78,8 +79,6 @@ type Monitor struct {
 	sem         chan struct{}
 	done        chan struct{}
 	wg          sync.WaitGroup
-	// ICMP identifier — XOR'd with PID to avoid collision with the ICMP monitor.
-	id int
 }
 
 // NewMonitor creates a new traceroute monitor.
@@ -96,7 +95,6 @@ func NewMonitor(targetsFile, probe string, interval time.Duration) (*Monitor, er
 		interval:    interval,
 		sem:         make(chan struct{}, 3), // traceroute is expensive; limit concurrency
 		done:        make(chan struct{}),
-		id:          (os.Getpid() ^ 0x4000) & 0xffff,
 	}, nil
 }
 
@@ -149,8 +147,12 @@ func (m *Monitor) traceAll() {
 
 	for _, t := range targets {
 		t := t
+		select {
+		case m.sem <- struct{}{}:
+		case <-m.done:
+			return
+		}
 		m.wg.Add(1)
-		m.sem <- struct{}{}
 		go func() {
 			defer m.wg.Done()
 			defer func() { <-m.sem }()
@@ -170,11 +172,40 @@ func (m *Monitor) traceTarget(target Target) {
 		probesPerHop = 3
 	}
 
-	dst, err := net.ResolveIPAddr("ip4", target.Host)
+	// Per-target ICMP ID derived from FNV hash of the host name. Avoids
+	// collision when multiple targets are probed concurrently (unlike a single
+	// PID-based ID shared across all goroutines).
+	h := fnv.New32a()
+	h.Write([]byte(target.Host))
+	id := int(h.Sum32() & 0xffff)
+
+	// Resolve with a timeout so a slow DNS server can't block the goroutine
+	// indefinitely. net.ResolveIPAddr has no context parameter.
+	resolveCtx, resolveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer resolveCancel()
+	addrs, err := net.DefaultResolver.LookupIPAddr(resolveCtx, target.Host)
 	if err != nil {
 		slog.Error("traceroute: cannot resolve host", "host", target.Host, "error", err)
 		return
 	}
+	var dst *net.IPAddr
+	for _, a := range addrs {
+		if a.IP.To4() != nil {
+			dst = &net.IPAddr{IP: a.IP}
+			break
+		}
+	}
+	if dst == nil {
+		slog.Error("traceroute: no IPv4 address for host", "host", target.Host)
+		return
+	}
+
+	// Remove stale hop_ip_info series from the previous trace. Without this,
+	// path changes accumulate unbounded {hop_ip} label values over time.
+	tracerouteHopInfo.DeletePartialMatch(prometheus.Labels{
+		"probe":  m.probe,
+		"target": target.Host,
+	})
 
 	// One raw socket per trace run.
 	conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
@@ -194,7 +225,7 @@ func (m *Monitor) traceTarget(target Target) {
 
 	for hop := 1; hop <= maxHops; hop++ {
 		hopLabel := fmt.Sprintf("%d", hop)
-		hopIP, avgRTT, reached := m.probeHop(conn, p4, dst, hop, probesPerHop)
+		hopIP, avgRTT, reached := m.probeHop(conn, p4, dst, hop, probesPerHop, id)
 
 		if hopIP != "" {
 			tracerouteHopRTT.With(prometheus.Labels{
@@ -230,11 +261,12 @@ func (m *Monitor) traceTarget(target Target) {
 // probeHop sends probesPerHop ICMP echo requests with TTL=hop to dst and
 // collects replies. Returns the responding IP, average RTT across successful
 // probes, and whether the destination itself was reached.
+// id is the per-trace ICMP identifier (derived from target host hash).
 func (m *Monitor) probeHop(
 	conn *icmp.PacketConn,
 	p4 *ipv4.PacketConn,
 	dst *net.IPAddr,
-	hop, probesPerHop int,
+	hop, probesPerHop, id int,
 ) (hopIP string, avgRTT float64, reached bool) {
 	var rtts []float64
 	var respondingIP string
@@ -250,7 +282,7 @@ func (m *Monitor) probeHop(
 			Type: ipv4.ICMPTypeEcho,
 			Code: 0,
 			Body: &icmp.Echo{
-				ID:   m.id,
+				ID:   id,
 				Seq:  seq,
 				Data: payload,
 			},
@@ -288,7 +320,7 @@ func (m *Monitor) probeHop(
 			switch rm.Type {
 			case ipv4.ICMPTypeEchoReply:
 				echo, ok := rm.Body.(*icmp.Echo)
-				if !ok || echo.ID != m.id || echo.Seq != seq {
+				if !ok || echo.ID != id || echo.Seq != seq {
 					continue
 				}
 				respondingIP = peer.String()
@@ -308,7 +340,7 @@ func (m *Monitor) probeHop(
 				}
 				origID := int(te.Data[24])<<8 | int(te.Data[25])
 				origSeq := int(te.Data[26])<<8 | int(te.Data[27])
-				if origID != m.id || origSeq != seq {
+				if origID != id || origSeq != seq {
 					continue
 				}
 				respondingIP = peer.String()

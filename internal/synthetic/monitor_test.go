@@ -47,10 +47,20 @@ func TestExpandVars_LocalOverridesEnv(t *testing.T) {
 }
 
 func TestExpandVars_FallsBackToEnv(t *testing.T) {
-	t.Setenv("ONLY_IN_ENV", "env-value")
-	got := expandVars("${ONLY_IN_ENV}", map[string]string{})
+	// Only MONITOR_-prefixed env vars are allowed through to prevent leaking
+	// sensitive variables like DB_PASSWORD or AWS_SECRET_KEY.
+	t.Setenv("MONITOR_ONLY_IN_ENV", "env-value")
+	got := expandVars("${MONITOR_ONLY_IN_ENV}", map[string]string{})
 	if got != "env-value" {
 		t.Fatalf("expected env value, got %q", got)
+	}
+}
+
+func TestExpandVars_NonPrefixedEnvBlocked(t *testing.T) {
+	t.Setenv("DB_PASSWORD", "secret")
+	got := expandVars("${DB_PASSWORD}", map[string]string{})
+	if got != "" {
+		t.Fatalf("expected empty string for non-MONITOR_ env var, got %q", got)
 	}
 }
 

@@ -178,8 +178,12 @@ func (m *Monitor) runAll() {
 
 	for _, f := range flows {
 		f := f
+		select {
+		case m.sem <- struct{}{}:
+		case <-m.done:
+			return
+		}
 		m.wg.Add(1)
-		m.sem <- struct{}{}
 		go func() {
 			defer m.wg.Done()
 			defer func() { <-m.sem }()
@@ -195,6 +199,11 @@ func (m *Monitor) runFlow(flow Flow) {
 
 	for _, step := range flow.Steps {
 		if err := m.runStep(flow.Name, step, vars); err != nil {
+			// Record duration even on failure so p50/p95 reflect the full picture.
+			syntheticFlowDuration.With(prometheus.Labels{
+				"probe": m.probe,
+				"flow":  flow.Name,
+			}).Observe(time.Since(flowStart).Seconds())
 			syntheticFlowFailure.With(prometheus.Labels{
 				"probe":  m.probe,
 				"flow":   flow.Name,
@@ -237,7 +246,9 @@ func classifyStepError(err error) string {
 }
 
 func (m *Monitor) runStep(flowName string, step Step, vars map[string]string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// 25s per-step < 30s client timeout so DeadlineExceeded comes from here,
+	// not the client, making timeout attribution unambiguous.
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
 	url := expandVars(step.URL, vars)
@@ -358,13 +369,18 @@ func extractJSONKey(body []byte, path string) (string, error) {
 }
 
 // expandVars replaces ${VAR} placeholders: first checks the local vars map
-// (extracted values from previous steps), then falls back to os.Getenv.
+// (extracted values from previous steps), then falls back to env vars that
+// have the MONITOR_ prefix. Only the MONITOR_ prefix is allowed to prevent
+// accidental leakage of sensitive variables like AWS_SECRET_KEY or DB_PASSWORD.
 func expandVars(s string, vars map[string]string) string {
 	return os.Expand(s, func(key string) string {
 		if v, ok := vars[key]; ok {
 			return v
 		}
-		return os.Getenv(key)
+		if strings.HasPrefix(key, "MONITOR_") {
+			return os.Getenv(key)
+		}
+		return ""
 	})
 }
 

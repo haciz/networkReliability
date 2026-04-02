@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -114,12 +115,20 @@ func main() {
 	stopDone := make(chan struct{})
 	go func() {
 		defer close(stopDone)
-		dnsMonitor.Stop()
-		httpMonitor.Stop()
-		tcpMonitor.Stop()
-		icmpMonitor.Stop()
-		syntheticMonitor.Stop()
-		tracerouteMonitor.Stop()
+		var wg sync.WaitGroup
+		for _, stop := range []func(){
+			dnsMonitor.Stop,
+			httpMonitor.Stop,
+			tcpMonitor.Stop,
+			icmpMonitor.Stop,
+			syntheticMonitor.Stop,
+			tracerouteMonitor.Stop,
+		} {
+			stop := stop
+			wg.Add(1)
+			go func() { defer wg.Done(); stop() }()
+		}
+		wg.Wait()
 	}()
 
 	select {

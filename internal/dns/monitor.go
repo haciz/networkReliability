@@ -170,8 +170,12 @@ func (m *Monitor) checkAll() {
 
 	for _, t := range targets {
 		t := t
+		select {
+		case m.sem <- struct{}{}:
+		case <-m.done:
+			return
+		}
 		m.wg.Add(1)
-		m.sem <- struct{}{}
 		go func() {
 			defer m.wg.Done()
 			defer func() { <-m.sem }()
@@ -181,8 +185,12 @@ func (m *Monitor) checkAll() {
 
 	for _, ct := range compareTargets {
 		ct := ct
+		select {
+		case m.sem <- struct{}{}:
+		case <-m.done:
+			return
+		}
 		m.wg.Add(1)
-		m.sem <- struct{}{}
 		go func() {
 			defer m.wg.Done()
 			defer func() { <-m.sem }()
@@ -197,15 +205,21 @@ func (m *Monitor) checkAll() {
 func (m *Monitor) checkDNSCompare(ct CompareTarget) {
 	type result struct {
 		resolver string
-		answers  []string // sorted RR values
+		answers  []string // sorted RR values (TTL-stripped)
 		ok       bool
 	}
 
+	// Bound concurrency within a compare target to prevent a misconfigured
+	// resolver list (e.g. 100 entries) from spawning unbounded goroutines.
+	const maxCompareConcurrency = 8
+	sem := make(chan struct{}, maxCompareConcurrency)
 	resultCh := make(chan result, len(ct.Resolvers))
 
 	for _, resolver := range ct.Resolvers {
 		resolver := resolver
+		sem <- struct{}{}
 		go func() {
+			defer func() { <-sem }()
 			answers, ok := m.queryAndRecord(ct.Domain, ct.RecordType, resolver)
 			resultCh <- result{resolver: resolver, answers: answers, ok: ok}
 		}()
@@ -225,14 +239,24 @@ func (m *Monitor) checkDNSCompare(ct CompareTarget) {
 		}
 	}
 
+	// If fewer than 2 resolvers succeeded we cannot determine disagreement.
+	// Emitting 0 here would be a false "all agree" — skip the metric instead.
+	if len(successAnswers) < 2 {
+		slog.Warn("DNS compare: too few resolvers succeeded to determine disagreement",
+			"domain", ct.Domain,
+			"record_type", ct.RecordType,
+			"total", len(ct.Resolvers),
+			"succeeded", len(successAnswers),
+		)
+		return
+	}
+
 	disagreement := 0.0
-	if len(successAnswers) >= 2 {
-		ref := canonicalAnswerSet(successAnswers[0])
-		for _, other := range successAnswers[1:] {
-			if canonicalAnswerSet(other) != ref {
-				disagreement = 1.0
-				break
-			}
+	ref := canonicalAnswerSet(successAnswers[0])
+	for _, other := range successAnswers[1:] {
+		if canonicalAnswerSet(other) != ref {
+			disagreement = 1.0
+			break
 		}
 	}
 
@@ -266,9 +290,11 @@ func (m *Monitor) queryAndRecord(domain, recordType, resolver string) ([]string,
 	msg := dns.Msg{}
 	msg.SetQuestion(dns.Fqdn(domain), qType)
 
+	// Use SplitHostPort to detect whether a port is already present.
+	// strings.Contains(addr, ":") breaks for bare IPv6 addresses like "::1".
 	resolverAddr := resolver
-	if !strings.Contains(resolverAddr, ":") {
-		resolverAddr += ":53"
+	if _, _, err := net.SplitHostPort(resolverAddr); err != nil {
+		resolverAddr = net.JoinHostPort(resolverAddr, "53")
 	}
 
 	start := time.Now()
@@ -310,13 +336,23 @@ func (m *Monitor) queryAndRecord(domain, recordType, resolver string) ([]string,
 	return answers, true
 }
 
-// canonicalAnswerSet sorts and joins answer strings so two sets can be compared
-// with a simple string equality check.
+// canonicalAnswerSet strips TTL from each RR string, then sorts and joins them
+// for comparison. DNS RR strings have the format "name\tTTL\tclass\ttype\tdata";
+// including TTL causes constant false-positive disagreements because TTL counts
+// down independently on each resolver.
 func canonicalAnswerSet(answers []string) string {
-	sorted := make([]string, len(answers))
-	copy(sorted, answers)
-	sort.Strings(sorted)
-	return strings.Join(sorted, "\n")
+	parts := make([]string, 0, len(answers))
+	for _, rr := range answers {
+		// Strip field[1] (the TTL) to get "name\tclass\ttype\tdata".
+		fields := strings.SplitN(rr, "\t", 5)
+		if len(fields) == 5 {
+			parts = append(parts, fields[0]+"\t"+fields[2]+"\t"+fields[3]+"\t"+fields[4])
+		} else {
+			parts = append(parts, rr) // unexpected format — use as-is
+		}
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\n")
 }
 
 func (m *Monitor) checkDNS(target Target) {
@@ -332,12 +368,13 @@ func (m *Monitor) checkDNS(target Target) {
 	msg := dns.Msg{}
 	msg.SetQuestion(dns.Fqdn(target.Domain), qType)
 
-	start := time.Now()
-	// Support "host" (appends :53) and "host:port" (used as-is, e.g. for testing).
+	// Use SplitHostPort to detect whether a port is already present.
+	// strings.Contains(addr, ":") breaks for bare IPv6 addresses like "::1".
 	resolverAddr := target.Resolver
-	if !strings.Contains(resolverAddr, ":") {
-		resolverAddr = resolverAddr + ":53"
+	if _, _, err := net.SplitHostPort(resolverAddr); err != nil {
+		resolverAddr = net.JoinHostPort(resolverAddr, "53")
 	}
+	start := time.Now()
 	resp, _, err := c.ExchangeContext(ctx, &msg, resolverAddr)
 	rtt := time.Since(start)
 
