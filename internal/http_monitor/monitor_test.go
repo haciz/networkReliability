@@ -260,6 +260,28 @@ func TestNormalizeURL(t *testing.T) {
 	}
 }
 
+func TestCheckHTTP_CustomHeaders(t *testing.T) {
+	var receivedAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	probe := "test_http_headers"
+	m := newTestMonitor(t, probe)
+	target := Target{
+		URL:     srv.URL + "/api",
+		Method:  "GET",
+		Headers: map[string]string{"Authorization": "Bearer test-token"},
+	}
+	m.checkHTTP(target)
+
+	if receivedAuth != "Bearer test-token" {
+		t.Fatalf("expected Authorization header 'Bearer test-token', got %q", receivedAuth)
+	}
+}
+
 func TestReload_UpdatesTargets(t *testing.T) {
 	f := writeTempTargets(t, "http://example.com GET\n")
 	m, err := NewMonitor(f, "test", time.Minute)

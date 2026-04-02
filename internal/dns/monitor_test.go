@@ -249,6 +249,161 @@ func TestReload_UpdatesTargets(t *testing.T) {
 	}
 }
 
+func TestCanonicalAnswerSet_SortsAndJoins(t *testing.T) {
+	cases := []struct {
+		input []string
+		want  string
+	}{
+		{[]string{"b", "a", "c"}, "a\nb\nc"},
+		{[]string{"x"}, "x"},
+		{[]string{}, ""},
+	}
+	for _, c := range cases {
+		got := canonicalAnswerSet(c.input)
+		if got != c.want {
+			t.Errorf("canonicalAnswerSet(%v) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+func TestCheckDNSCompare_Agreement(t *testing.T) {
+	handler := func(w dns.ResponseWriter, r *dns.Msg) {
+		m := new(dns.Msg)
+		m.SetReply(r)
+		m.Answer = append(m.Answer, &dns.A{
+			Hdr: dns.RR_Header{Name: r.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			A:   net.ParseIP("1.2.3.4"),
+		})
+		w.WriteMsg(m)
+	}
+	addr1 := startDNSServer(t, handler)
+	addr2 := startDNSServer(t, handler)
+
+	probe := "test_cmp_agree"
+	ct := CompareTarget{
+		Domain:     "example.com",
+		RecordType: "A",
+		Resolvers:  []string{addr1, addr2},
+	}
+	m := newTestMonitor(t, probe, fmt.Sprintf("example.com A %s\n", addr1))
+	m.checkDNSCompare(ct)
+
+	labels := prometheus.Labels{"probe": probe, "domain": "example.com", "record_type": "A"}
+	got := testutil.ToFloat64(dnsResolverDisagreement.With(labels))
+	if got != 0.0 {
+		t.Fatalf("expected disagreement=0, got %f", got)
+	}
+}
+
+func TestCheckDNSCompare_Disagreement(t *testing.T) {
+	addr1 := startDNSServer(t, func(w dns.ResponseWriter, r *dns.Msg) {
+		m := new(dns.Msg)
+		m.SetReply(r)
+		m.Answer = append(m.Answer, &dns.A{
+			Hdr: dns.RR_Header{Name: r.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			A:   net.ParseIP("1.1.1.1"),
+		})
+		w.WriteMsg(m)
+	})
+	addr2 := startDNSServer(t, func(w dns.ResponseWriter, r *dns.Msg) {
+		m := new(dns.Msg)
+		m.SetReply(r)
+		m.Answer = append(m.Answer, &dns.A{
+			Hdr: dns.RR_Header{Name: r.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			A:   net.ParseIP("2.2.2.2"),
+		})
+		w.WriteMsg(m)
+	})
+
+	probe := "test_cmp_disagree"
+	ct := CompareTarget{
+		Domain:     "split.example",
+		RecordType: "A",
+		Resolvers:  []string{addr1, addr2},
+	}
+	m := newTestMonitor(t, probe, fmt.Sprintf("split.example A %s\n", addr1))
+	m.checkDNSCompare(ct)
+
+	labels := prometheus.Labels{"probe": probe, "domain": "split.example", "record_type": "A"}
+	got := testutil.ToFloat64(dnsResolverDisagreement.With(labels))
+	if got != 1.0 {
+		t.Fatalf("expected disagreement=1, got %f", got)
+	}
+}
+
+func TestLoadTargetsYAML_MultiResolver(t *testing.T) {
+	content := `targets:
+  - domain: example.com
+    record_type: A
+    resolvers:
+      - 8.8.8.8
+      - 1.1.1.1
+`
+	f := writeTempTargets(t, content)
+	// rename so config.IsYAML returns true
+	yamlFile := f + ".yaml"
+	if err := os.Rename(f, yamlFile); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(yamlFile) })
+
+	targets, compareTargets, err := loadTargets(yamlFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(targets) != 0 {
+		t.Fatalf("expected 0 single-resolver targets, got %d", len(targets))
+	}
+	if len(compareTargets) != 1 {
+		t.Fatalf("expected 1 compare target, got %d", len(compareTargets))
+	}
+	if len(compareTargets[0].Resolvers) != 2 {
+		t.Fatalf("expected 2 resolvers, got %d", len(compareTargets[0].Resolvers))
+	}
+}
+
+func TestLoadTargetsYAML_BothResolverAndResolvers_Error(t *testing.T) {
+	content := `targets:
+  - domain: example.com
+    record_type: A
+    resolver: 8.8.8.8
+    resolvers:
+      - 8.8.8.8
+      - 1.1.1.1
+`
+	f := writeTempTargets(t, content)
+	yamlFile := f + ".yaml"
+	if err := os.Rename(f, yamlFile); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(yamlFile) })
+
+	_, _, err := loadTargets(yamlFile)
+	if err == nil {
+		t.Fatal("expected error for both resolver and resolvers, got nil")
+	}
+}
+
+func TestLoadTargetsYAML_OneResolver_Error(t *testing.T) {
+	content := `targets:
+  - domain: example.com
+    record_type: A
+    resolvers:
+      - 8.8.8.8
+`
+	f := writeTempTargets(t, content)
+	yamlFile := f + ".yaml"
+	if err := os.Rename(f, yamlFile); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(yamlFile) })
+
+	_, _, err := loadTargets(yamlFile)
+	if err == nil {
+		t.Fatal("expected error for resolvers with only 1 entry, got nil")
+	}
+}
+
 func TestClassifyRcode(t *testing.T) {
 	cases := []struct{ rcode int; want string }{
 		{dns.RcodeNameError, "nxdomain"},

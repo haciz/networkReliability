@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -13,18 +14,22 @@ import (
 	"monitoring-app/internal/dns"
 	"monitoring-app/internal/http_monitor"
 	"monitoring-app/internal/icmp"
+	"monitoring-app/internal/synthetic"
 	"monitoring-app/internal/tcp"
+	"monitoring-app/internal/traceroute"
 )
 
 func main() {
-	promPort        := flag.String("prom-port", "2112", "Prometheus metrics port")
-	probeName       := flag.String("probe-name", "default", "Name of this probe appliance (appears on every metric label)")
-	dnsTargetsFile  := flag.String("dns-targets", "config/dns_targets.yaml", "File with DNS targets to monitor")
-	httpTargetsFile := flag.String("http-targets", "config/http_targets.yaml", "File with HTTP targets to monitor")
-	tcpTargetsFile  := flag.String("tcp-targets", "config/tcp_targets.yaml", "File with TCP targets to monitor")
-	icmpTargetsFile := flag.String("icmp-targets", "config/icmp_targets.yaml", "File with ICMP ping targets to monitor")
-	interval        := flag.Duration("interval", 10*time.Second, "Monitoring interval")
-	logFormat       := flag.String("log-format", "json", "Log format: json or text")
+	promPort             := flag.String("prom-port", "2112", "Prometheus metrics port")
+	probeName            := flag.String("probe-name", "default", "Name of this probe appliance (appears on every metric label)")
+	dnsTargetsFile       := flag.String("dns-targets", "config/dns_targets.yaml", "File with DNS targets to monitor")
+	httpTargetsFile      := flag.String("http-targets", "config/http_targets.yaml", "File with HTTP targets to monitor")
+	tcpTargetsFile       := flag.String("tcp-targets", "config/tcp_targets.yaml", "File with TCP targets to monitor")
+	icmpTargetsFile      := flag.String("icmp-targets", "config/icmp_targets.yaml", "File with ICMP ping targets to monitor")
+	syntheticConfigFile  := flag.String("synthetic-flows", "config/synthetic_flows.yaml", "File with synthetic flow definitions")
+	tracerouteTargets    := flag.String("traceroute-targets", "config/traceroute_targets.yaml", "File with traceroute targets")
+	interval             := flag.Duration("interval", 10*time.Second, "Monitoring interval")
+	logFormat            := flag.String("log-format", "json", "Log format: json or text")
 	flag.Parse()
 
 	// Configure structured logging. JSON for production; text for local dev.
@@ -62,6 +67,20 @@ func main() {
 	}
 	go icmpMonitor.Start()
 
+	syntheticMonitor, err := synthetic.NewMonitor(*syntheticConfigFile, *probeName, *interval)
+	if err != nil {
+		slog.Error("failed to create synthetic monitor", "error", err)
+		os.Exit(1)
+	}
+	go syntheticMonitor.Start()
+
+	tracerouteMonitor, err := traceroute.NewMonitor(*tracerouteTargets, *probeName, *interval)
+	if err != nil {
+		slog.Error("failed to create traceroute monitor", "error", err)
+		os.Exit(1)
+	}
+	go tracerouteMonitor.Start()
+
 	// Prometheus metrics endpoint
 	http.Handle("/metrics", promhttp.Handler())
 	go func() {
@@ -83,6 +102,8 @@ func main() {
 			httpMonitor.Reload()
 			tcpMonitor.Reload()
 			icmpMonitor.Reload()
+			syntheticMonitor.Reload()
+			tracerouteMonitor.Reload()
 		}
 	}()
 
@@ -94,10 +115,20 @@ func main() {
 	stopDone := make(chan struct{})
 	go func() {
 		defer close(stopDone)
-		dnsMonitor.Stop()
-		httpMonitor.Stop()
-		tcpMonitor.Stop()
-		icmpMonitor.Stop()
+		var wg sync.WaitGroup
+		for _, stop := range []func(){
+			dnsMonitor.Stop,
+			httpMonitor.Stop,
+			tcpMonitor.Stop,
+			icmpMonitor.Stop,
+			syntheticMonitor.Stop,
+			tracerouteMonitor.Stop,
+		} {
+			stop := stop
+			wg.Add(1)
+			go func() { defer wg.Done(); stop() }()
+		}
+		wg.Wait()
 	}()
 
 	select {

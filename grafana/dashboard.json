@@ -858,6 +858,336 @@
         { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
       ],
       "yaxis": { "align": false, "alignLevel": null }
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 57 },
+      "id": 31,
+      "panels": [],
+      "title": "SLO / Availability",
+      "type": "row"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 58 },
+      "hiddenSeries": false,
+      "id": 32,
+      "legend": { "avg": false, "current": false, "max": false, "min": false, "show": true, "total": false, "values": false },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": { "alertThreshold": true },
+      "percentage": false,
+      "pluginVersion": "7.3.7",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "thresholds": [
+        { "colorMode": "critical", "fill": true, "line": true, "op": "lt", "value": 0.999, "yaxis": "left" },
+        { "colorMode": "warning", "fill": false, "line": true, "op": "lt", "value": 0.9999, "yaxis": "left" }
+      ],
+      "targets": [
+        {
+          "expr": "sum(rate(monitoring_http_request_duration_seconds_count{probe=~\"$probe\",status_code!~\"5..\"}[7d])) by (url) / sum(rate(monitoring_http_request_duration_seconds_count{probe=~\"$probe\"}[7d])) by (url)",
+          "interval": "",
+          "legendFormat": "{{url}}",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "HTTP Availability (7d rolling, excl. 5xx)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
+      "yaxes": [
+        { "format": "percentunit", "label": null, "logBase": 1, "max": "1", "min": "0.99", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
+      ],
+      "yaxis": { "align": false, "alignLevel": null }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 58 },
+      "hiddenSeries": false,
+      "id": 33,
+      "legend": { "avg": false, "current": false, "max": false, "min": false, "show": true, "total": false, "values": false },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": { "alertThreshold": true },
+      "percentage": false,
+      "pluginVersion": "7.3.7",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "thresholds": [
+        { "colorMode": "critical", "fill": true, "line": true, "op": "lt", "value": 0.999, "yaxis": "left" },
+        { "colorMode": "warning", "fill": false, "line": true, "op": "lt", "value": 0.9999, "yaxis": "left" }
+      ],
+      "targets": [
+        {
+          "expr": "sum(rate(monitoring_tcp_connection_success_total{probe=~\"$probe\"}[7d])) by (host,port) / (sum(rate(monitoring_tcp_connection_success_total{probe=~\"$probe\"}[7d])) by (host,port) + sum(rate(monitoring_tcp_connection_failure_total{probe=~\"$probe\"}[7d])) by (host,port))",
+          "interval": "",
+          "legendFormat": "{{host}}:{{port}}",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "TCP Availability (7d rolling)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
+      "yaxes": [
+        { "format": "percentunit", "label": null, "logBase": 1, "max": "1", "min": "0.99", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
+      ],
+      "yaxis": { "align": false, "alignLevel": null }
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 75 },
+      "id": 37,
+      "panels": [],
+      "title": "Synthetic Flows",
+      "type": "row"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 76 },
+      "hiddenSeries": false,
+      "id": 38,
+      "legend": { "avg": false, "current": false, "max": false, "min": false, "show": true, "total": false, "values": false },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": { "alertThreshold": true },
+      "percentage": false,
+      "pluginVersion": "7.3.7",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "thresholds": [
+        { "colorMode": "warning", "fill": false, "line": true, "op": "gt", "value": 2, "yaxis": "left" },
+        { "colorMode": "critical", "fill": false, "line": true, "op": "gt", "value": 5, "yaxis": "left" }
+      ],
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(monitoring_synthetic_flow_duration_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, flow))",
+          "interval": "",
+          "legendFormat": "p95 {{flow}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(monitoring_synthetic_flow_duration_seconds_bucket{probe=~\"$probe\"}[5m])) by (le, flow))",
+          "interval": "",
+          "legendFormat": "p50 {{flow}}",
+          "refId": "B"
+        }
+      ],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Synthetic Flow Duration (p50 / p95)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
+      "yaxes": [
+        { "format": "s", "label": null, "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
+      ],
+      "yaxis": { "align": false, "alignLevel": null }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 76 },
+      "hiddenSeries": false,
+      "id": 39,
+      "legend": { "avg": false, "current": false, "max": false, "min": false, "show": true, "total": false, "values": false },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": { "alertThreshold": true },
+      "percentage": false,
+      "pluginVersion": "7.3.7",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "thresholds": [],
+      "targets": [
+        {
+          "expr": "sum(rate(monitoring_synthetic_flow_failure_total{probe=~\"$probe\"}[5m])) by (flow, step, reason)",
+          "interval": "",
+          "legendFormat": "{{flow}} / {{step}} [{{reason}}]",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Synthetic Flow Failures by Step & Reason",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
+      "yaxes": [
+        { "format": "ops", "label": null, "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
+      ],
+      "yaxis": { "align": false, "alignLevel": null }
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 84 },
+      "id": 40,
+      "panels": [],
+      "title": "Traceroute",
+      "type": "row"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
+      "fill": 0,
+      "fillGradient": 0,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 85 },
+      "hiddenSeries": false,
+      "id": 41,
+      "legend": { "avg": false, "current": false, "max": false, "min": false, "show": true, "total": false, "values": false },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": { "alertThreshold": true },
+      "percentage": false,
+      "pluginVersion": "7.3.7",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "thresholds": [],
+      "targets": [
+        {
+          "expr": "monitoring_traceroute_hop_rtt_seconds{probe=~\"$probe\"} * 1000",
+          "interval": "",
+          "legendFormat": "{{target}} hop {{hop}}",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Traceroute Hop RTT (ms)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
+      "yaxes": [
+        { "format": "ms", "label": null, "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
+      ],
+      "yaxis": { "align": false, "alignLevel": null }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "custom": {} }, "overrides": [] },
+      "fill": 0,
+      "fillGradient": 0,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 85 },
+      "hiddenSeries": false,
+      "id": 42,
+      "legend": { "avg": false, "current": false, "max": false, "min": false, "show": true, "total": false, "values": false },
+      "lines": false,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": { "alertThreshold": true },
+      "percentage": false,
+      "pluginVersion": "7.3.7",
+      "pointradius": 4,
+      "points": true,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "thresholds": [],
+      "targets": [
+        {
+          "expr": "monitoring_traceroute_hops_total{probe=~\"$probe\"}",
+          "interval": "",
+          "legendFormat": "{{target}}",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": null,
+      "timeRegions": [],
+      "timeShift": null,
+      "title": "Traceroute Total Hops",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "buckets": null, "mode": "time", "name": null, "show": true, "values": [] },
+      "yaxes": [
+        { "format": "short", "label": "hops", "logBase": 1, "max": null, "min": "0", "show": true },
+        { "format": "short", "label": null, "logBase": 1, "max": null, "min": null, "show": true }
+      ],
+      "yaxis": { "align": false, "alignLevel": null }
     }
   ],
   "refresh": "10s",
@@ -869,5 +1199,5 @@
   "timezone": "",
   "title": "Network Monitoring Dashboard",
   "uid": "network-monitoring",
-  "version": 4
+  "version": 5
 }

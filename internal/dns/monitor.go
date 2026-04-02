@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,18 @@ import (
 )
 
 var (
+	// dnsResolverDisagreement is 1 when two or more resolvers return different
+	// answer sets for the same query (split-brain DNS, partial propagation, etc.).
+	dnsResolverDisagreement = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "monitoring",
+			Subsystem: "dns",
+			Name:      "resolver_disagreement",
+			Help:      "1 if multiple resolvers return different answers for the same query, 0 if consistent",
+		},
+		[]string{"probe", "domain", "record_type"},
+	)
+
 	dnsResolutionTime = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "monitoring",
@@ -60,52 +73,63 @@ var (
 	)
 )
 
-// Target represents a DNS target to monitor.
+// Target represents a single-resolver DNS probe.
 type Target struct {
 	Domain     string
 	RecordType string
 	Resolver   string
 }
 
+// CompareTarget probes the same domain across multiple resolvers simultaneously
+// and emits a disagreement metric when answers differ.
+type CompareTarget struct {
+	Domain     string
+	RecordType string
+	Resolvers  []string
+}
+
 // Monitor handles DNS monitoring.
 type Monitor struct {
-	probe       string
-	targetsFile string
-	targets     []Target
-	mu          sync.RWMutex
-	interval    time.Duration
-	sem         chan struct{} // bounds concurrent probes
-	done        chan struct{}
-	wg          sync.WaitGroup // tracks in-flight probes for graceful shutdown
+	probe          string
+	targetsFile    string
+	targets        []Target
+	compareTargets []CompareTarget
+	mu             sync.RWMutex
+	interval       time.Duration
+	sem            chan struct{} // bounds concurrent probes
+	done           chan struct{}
+	wg             sync.WaitGroup // tracks in-flight probes for graceful shutdown
 }
 
 // NewMonitor creates a new DNS monitor.
 func NewMonitor(targetsFile, probe string, interval time.Duration) (*Monitor, error) {
-	targets, err := loadTargets(targetsFile)
+	targets, compareTargets, err := loadTargets(targetsFile)
 	if err != nil {
 		return nil, err
 	}
 	return &Monitor{
-		probe:       probe,
-		targetsFile: targetsFile,
-		targets:     targets,
-		interval:    interval,
-		sem:         make(chan struct{}, 10),
-		done:        make(chan struct{}),
+		probe:          probe,
+		targetsFile:    targetsFile,
+		targets:        targets,
+		compareTargets: compareTargets,
+		interval:       interval,
+		sem:            make(chan struct{}, 10),
+		done:           make(chan struct{}),
 	}, nil
 }
 
 // Reload re-reads the targets file atomically. Called on SIGHUP.
 func (m *Monitor) Reload() {
-	targets, err := loadTargets(m.targetsFile)
+	targets, compareTargets, err := loadTargets(m.targetsFile)
 	if err != nil {
 		slog.Error("DNS monitor reload failed", "error", err)
 		return
 	}
 	m.mu.Lock()
 	m.targets = targets
+	m.compareTargets = compareTargets
 	m.mu.Unlock()
-	slog.Info("DNS monitor reloaded targets", "count", len(targets), "file", m.targetsFile)
+	slog.Info("DNS monitor reloaded targets", "count", len(targets)+len(compareTargets), "file", m.targetsFile)
 }
 
 // Start begins the DNS monitoring loop.
@@ -140,18 +164,195 @@ func (m *Monitor) checkAll() {
 	m.mu.RLock()
 	targets := make([]Target, len(m.targets))
 	copy(targets, m.targets)
+	compareTargets := make([]CompareTarget, len(m.compareTargets))
+	copy(compareTargets, m.compareTargets)
 	m.mu.RUnlock()
 
 	for _, t := range targets {
 		t := t
+		select {
+		case m.sem <- struct{}{}:
+		case <-m.done:
+			return
+		}
 		m.wg.Add(1)
-		m.sem <- struct{}{}
 		go func() {
 			defer m.wg.Done()
 			defer func() { <-m.sem }()
 			m.checkDNS(t)
 		}()
 	}
+
+	for _, ct := range compareTargets {
+		ct := ct
+		select {
+		case m.sem <- struct{}{}:
+		case <-m.done:
+			return
+		}
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			defer func() { <-m.sem }()
+			m.checkDNSCompare(ct)
+		}()
+	}
+}
+
+// checkDNSCompare queries the same domain across all resolvers in ct.Resolvers,
+// emits standard per-resolver metrics for each, then emits a disagreement gauge
+// if the answer sets differ across resolvers.
+func (m *Monitor) checkDNSCompare(ct CompareTarget) {
+	type result struct {
+		resolver string
+		answers  []string // sorted RR values (TTL-stripped)
+		ok       bool
+	}
+
+	// Bound concurrency within a compare target to prevent a misconfigured
+	// resolver list (e.g. 100 entries) from spawning unbounded goroutines.
+	const maxCompareConcurrency = 8
+	sem := make(chan struct{}, maxCompareConcurrency)
+	resultCh := make(chan result, len(ct.Resolvers))
+
+	for _, resolver := range ct.Resolvers {
+		resolver := resolver
+		sem <- struct{}{}
+		go func() {
+			defer func() { <-sem }()
+			answers, ok := m.queryAndRecord(ct.Domain, ct.RecordType, resolver)
+			resultCh <- result{resolver: resolver, answers: answers, ok: ok}
+		}()
+	}
+
+	// Collect all results.
+	results := make([]result, 0, len(ct.Resolvers))
+	for range ct.Resolvers {
+		results = append(results, <-resultCh)
+	}
+
+	// Compare answer sets across resolvers that succeeded.
+	var successAnswers [][]string
+	for _, r := range results {
+		if r.ok {
+			successAnswers = append(successAnswers, r.answers)
+		}
+	}
+
+	// If fewer than 2 resolvers succeeded we cannot determine disagreement.
+	// Emitting 0 here would be a false "all agree" — skip the metric instead.
+	if len(successAnswers) < 2 {
+		slog.Warn("DNS compare: too few resolvers succeeded to determine disagreement",
+			"domain", ct.Domain,
+			"record_type", ct.RecordType,
+			"total", len(ct.Resolvers),
+			"succeeded", len(successAnswers),
+		)
+		return
+	}
+
+	disagreement := 0.0
+	ref := canonicalAnswerSet(successAnswers[0])
+	for _, other := range successAnswers[1:] {
+		if canonicalAnswerSet(other) != ref {
+			disagreement = 1.0
+			break
+		}
+	}
+
+	dnsResolverDisagreement.With(prometheus.Labels{
+		"probe":       m.probe,
+		"domain":      ct.Domain,
+		"record_type": ct.RecordType,
+	}).Set(disagreement)
+
+	if disagreement == 1.0 {
+		slog.Warn("DNS resolver disagreement detected",
+			"domain", ct.Domain,
+			"record_type", ct.RecordType,
+			"resolvers", ct.Resolvers,
+		)
+	}
+}
+
+// queryAndRecord performs a single DNS query, records standard metrics, and
+// returns the sorted answer strings plus a success flag.
+func (m *Monitor) queryAndRecord(domain, recordType, resolver string) ([]string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	c := dns.Client{}
+	qType, ok := dns.StringToType[recordType]
+	if !ok {
+		qType = dns.TypeA
+	}
+
+	msg := dns.Msg{}
+	msg.SetQuestion(dns.Fqdn(domain), qType)
+
+	// Use SplitHostPort to detect whether a port is already present.
+	// strings.Contains(addr, ":") breaks for bare IPv6 addresses like "::1".
+	resolverAddr := resolver
+	if _, _, err := net.SplitHostPort(resolverAddr); err != nil {
+		resolverAddr = net.JoinHostPort(resolverAddr, "53")
+	}
+
+	start := time.Now()
+	resp, _, err := c.ExchangeContext(ctx, &msg, resolverAddr)
+	rtt := time.Since(start)
+
+	baseLabels := prometheus.Labels{
+		"probe":       m.probe,
+		"domain":      domain,
+		"record_type": recordType,
+		"resolver":    resolver,
+	}
+
+	if err != nil {
+		dnsResolutionFailure.With(prometheus.Labels{
+			"probe": m.probe, "domain": domain,
+			"record_type": recordType, "resolver": resolver,
+			"error_type": classifyError(err),
+		}).Inc()
+		return nil, false
+	}
+	if resp.Rcode != dns.RcodeSuccess {
+		dnsResolutionFailure.With(prometheus.Labels{
+			"probe": m.probe, "domain": domain,
+			"record_type": recordType, "resolver": resolver,
+			"error_type": classifyRcode(resp.Rcode),
+		}).Inc()
+		return nil, false
+	}
+
+	dnsResolutionTime.With(baseLabels).Observe(rtt.Seconds())
+	dnsResolutionSuccess.With(baseLabels).Inc()
+	dnsResponseSize.With(baseLabels).Observe(float64(resp.Len()))
+
+	answers := make([]string, 0, len(resp.Answer))
+	for _, rr := range resp.Answer {
+		answers = append(answers, rr.String())
+	}
+	return answers, true
+}
+
+// canonicalAnswerSet strips TTL from each RR string, then sorts and joins them
+// for comparison. DNS RR strings have the format "name\tTTL\tclass\ttype\tdata";
+// including TTL causes constant false-positive disagreements because TTL counts
+// down independently on each resolver.
+func canonicalAnswerSet(answers []string) string {
+	parts := make([]string, 0, len(answers))
+	for _, rr := range answers {
+		// Strip field[1] (the TTL) to get "name\tclass\ttype\tdata".
+		fields := strings.SplitN(rr, "\t", 5)
+		if len(fields) == 5 {
+			parts = append(parts, fields[0]+"\t"+fields[2]+"\t"+fields[3]+"\t"+fields[4])
+		} else {
+			parts = append(parts, rr) // unexpected format — use as-is
+		}
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "\n")
 }
 
 func (m *Monitor) checkDNS(target Target) {
@@ -167,12 +368,13 @@ func (m *Monitor) checkDNS(target Target) {
 	msg := dns.Msg{}
 	msg.SetQuestion(dns.Fqdn(target.Domain), qType)
 
-	start := time.Now()
-	// Support "host" (appends :53) and "host:port" (used as-is, e.g. for testing).
+	// Use SplitHostPort to detect whether a port is already present.
+	// strings.Contains(addr, ":") breaks for bare IPv6 addresses like "::1".
 	resolverAddr := target.Resolver
-	if !strings.Contains(resolverAddr, ":") {
-		resolverAddr = resolverAddr + ":53"
+	if _, _, err := net.SplitHostPort(resolverAddr); err != nil {
+		resolverAddr = net.JoinHostPort(resolverAddr, "53")
 	}
+	start := time.Now()
 	resp, _, err := c.ExchangeContext(ctx, &msg, resolverAddr)
 	rtt := time.Since(start)
 
@@ -245,19 +447,20 @@ type dnsYAMLConfig struct {
 }
 
 type dnsYAMLTarget struct {
-	Domain     string `yaml:"domain"`
-	RecordType string `yaml:"record_type"`
-	Resolver   string `yaml:"resolver"`
+	Domain     string   `yaml:"domain"`
+	RecordType string   `yaml:"record_type"`
+	Resolver   string   `yaml:"resolver"`   // single-resolver probe
+	Resolvers  []string `yaml:"resolvers"`  // multi-resolver comparison (mutually exclusive with Resolver)
 }
 
-func loadTargets(file string) ([]Target, error) {
+func loadTargets(file string) ([]Target, []CompareTarget, error) {
 	if config.IsYAML(file) {
 		return loadTargetsYAML(file)
 	}
-	// Legacy .txt path — kept for backward compatibility.
+	// Legacy .txt path — kept for backward compatibility (no multi-resolver support).
 	rows, err := config.LoadLines(file, 3)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	targets := make([]Target, 0, len(rows))
 	for _, parts := range rows {
@@ -267,13 +470,13 @@ func loadTargets(file string) ([]Target, error) {
 			Resolver:   parts[2],
 		})
 	}
-	return targets, nil
+	return targets, nil, nil
 }
 
-func loadTargetsYAML(file string) ([]Target, error) {
+func loadTargetsYAML(file string) ([]Target, []CompareTarget, error) {
 	var cfg dnsYAMLConfig
 	if err := config.DecodeYAML(file, &cfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var errs []string
 	for i, t := range cfg.Targets {
@@ -283,20 +486,37 @@ func loadTargetsYAML(file string) ([]Target, error) {
 		if t.RecordType == "" {
 			errs = append(errs, fmt.Sprintf("target[%d]: record_type is required", i))
 		}
-		if t.Resolver == "" {
-			errs = append(errs, fmt.Sprintf("target[%d]: resolver is required", i))
+		hasResolver := t.Resolver != ""
+		hasResolvers := len(t.Resolvers) > 0
+		if !hasResolver && !hasResolvers {
+			errs = append(errs, fmt.Sprintf("target[%d]: resolver or resolvers is required", i))
+		}
+		if hasResolver && hasResolvers {
+			errs = append(errs, fmt.Sprintf("target[%d]: resolver and resolvers are mutually exclusive", i))
+		}
+		if hasResolvers && len(t.Resolvers) < 2 {
+			errs = append(errs, fmt.Sprintf("target[%d]: resolvers requires at least 2 entries", i))
 		}
 	}
 	if len(errs) > 0 {
-		return nil, fmt.Errorf("%s: %s", file, strings.Join(errs, "; "))
+		return nil, nil, fmt.Errorf("%s: %s", file, strings.Join(errs, "; "))
 	}
-	targets := make([]Target, 0, len(cfg.Targets))
+	var targets []Target
+	var compareTargets []CompareTarget
 	for _, t := range cfg.Targets {
-		targets = append(targets, Target{
-			Domain:     t.Domain,
-			RecordType: t.RecordType,
-			Resolver:   t.Resolver,
-		})
+		if t.Resolver != "" {
+			targets = append(targets, Target{
+				Domain:     t.Domain,
+				RecordType: t.RecordType,
+				Resolver:   t.Resolver,
+			})
+		} else {
+			compareTargets = append(compareTargets, CompareTarget{
+				Domain:     t.Domain,
+				RecordType: t.RecordType,
+				Resolvers:  t.Resolvers,
+			})
+		}
 	}
-	return targets, nil
+	return targets, compareTargets, nil
 }

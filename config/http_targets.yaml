@@ -11,3 +11,10 @@ targets:
     method: GET
   - url: https://httpbin.org/status/404
     method: GET
+
+  # Example: authenticated endpoint using an env var for the token
+  # - url: https://api.example.com/health
+  #   method: GET
+  #   headers:
+  #     Authorization: "Bearer ${API_TOKEN}"
+  #     X-Probe-Source: "network-monitor"
